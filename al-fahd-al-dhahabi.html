@@ -418,16 +418,21 @@
           <div><div class="t" id="label-address">المقر الرئيسي</div><div class="v" id="value-address">المطينة، دبي، الإمارات العربية المتحدة</div></div>
         </div>
       </div>
-      <form class="contact-form" name="contact" method="POST" data-netlify="true" netlify-honeypot="bot-field" onsubmit="return handleSubmit(event)">
+      <form class="contact-form" id="contactForm" name="contact" method="POST" data-netlify="true" netlify-honeypot="botField" novalidate onsubmit="return handleSubmit(event)">
         <input type="hidden" name="form-name" value="contact">
-        <p style="display:none;"><label>Leave this field empty: <input name="bot-field"></label></p>
+        <p style="position:absolute;left:-9999px;" aria-hidden="true">
+          <label>Leave this field empty: <input name="botField" id="botField" tabindex="-1" autocomplete="off"></label>
+        </p>
         <div class="row2">
           <div class="field"><label id="label-name">الاسم الكامل</label><input type="text" id="input-name" name="name" required placeholder="اكتب اسمك"></div>
-          <div class="field"><label id="label-phone">رقم الجوال</label><input type="tel" id="input-phone" name="phone" required placeholder="05XXXXXXXX"></div>
+          <div class="field"><label id="label-phone">رقم الجوال / واتساب</label><input type="tel" id="input-phone" name="phone" placeholder="05XXXXXXXX"></div>
         </div>
-        <div class="field"><label id="label-emailform">البريد الإلكتروني</label><input type="email" id="input-email" name="email" required placeholder="example@email.com"></div>
+        <div class="row2">
+          <div class="field"><label id="label-emailform">البريد الإلكتروني</label><input type="email" id="input-email" name="email" required placeholder="example@email.com"></div>
+          <div class="field"><label id="label-company">الشركة</label><input type="text" id="input-company" name="company" placeholder="اسم الشركة (اختياري)"></div>
+        </div>
         <div class="field">
-          <label id="label-service">الخدمة المطلوبة</label>
+          <label id="label-service">مجال الاهتمام</label>
           <select id="select-service" name="service">
             <option id="opt-1">التجارة العامة</option>
             <option id="opt-2">الاستيراد والتصدير</option>
@@ -436,10 +441,17 @@
           </select>
         </div>
         <div class="field"><label id="label-message">الرسالة</label><textarea id="input-message" name="message" required placeholder="أخبرنا عن احتياجك..."></textarea></div>
-        <button type="submit" class="btn btn-gold" style="width:100%;justify-content:center;" id="btn-submit">إرسال الطلب</button>
-        <p id="formMsg" style="font-size:13px;color:var(--gold-400);margin-top:14px;display:none;">تم استلام رسالتك بنجاح، سنتواصل معك قريباً.</p>
-        <p id="formErr" style="font-size:13px;color:#e07a7a;margin-top:14px;display:none;">تعذر الإرسال، حاول مرة أخرى أو تواصل عبر واتساب.</p>
+
+        <div class="cta-row" style="margin-top:6px;">
+          <button type="submit" class="btn btn-gold" style="flex:1;justify-content:center;" id="btn-submit">إرسال الطلب</button>
+          <button type="button" class="btn btn-ghost" id="btn-whatsapp-fallback" style="flex:1;justify-content:center;">تواصل عبر واتساب</button>
+        </div>
+
+        <p id="formStatus" role="status" style="font-size:13px;margin-top:14px;display:none;"></p>
       </form>
+      <script>
+        document.getElementById('contactForm').dataset.loadedAt = Date.now();
+      </script>
     </div>
   </div>
 </section>
@@ -465,22 +477,84 @@
   function handleSubmit(e){
     e.preventDefault();
     const form = e.target;
+    const submitBtn = document.getElementById('btn-submit');
+
+    const name = document.getElementById('input-name').value.trim();
+    const email = document.getElementById('input-email').value.trim();
+    const message = document.getElementById('input-message').value.trim();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+    // Client-side validation — instant feedback (Netlify also re-validates required fields)
+    if (!name || !emailOk || !message) {
+      showStatus('validation', true);
+      return false;
+    }
+
+    // Bot honeypot: if a bot filled the hidden field, silently pretend success and stop.
+    if (document.getElementById('botField').value) {
+      showStatus('success', false);
+      form.reset();
+      return false;
+    }
+
+    // Time-trap: reject implausibly fast submissions client-side too.
+    if (Date.now() - Number(form.dataset.loadedAt) < 3000) {
+      showStatus('validation', true);
+      return false;
+    }
+
     const formData = new FormData(form);
-    document.getElementById('formErr').style.display = 'none';
-    fetch("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    submitBtn.disabled = true;
+    showStatus('sending', false);
+
+    fetch('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(formData).toString()
     })
-    .then(() => {
-      document.getElementById('formMsg').style.display = 'block';
-      form.reset();
-    })
-    .catch(() => {
-      document.getElementById('formErr').style.display = 'block';
-    });
+      .then((res) => {
+        if (res.ok) {
+          showStatus('success', false);
+          form.reset();
+        } else {
+          showStatus('error', true);
+        }
+      })
+      .catch(() => {
+        showStatus('error', true);
+      })
+      .finally(() => {
+        submitBtn.disabled = false;
+      });
+
     return false;
   }
+
+  const statusMessages = {
+    sending:     { ar: 'جارٍ الإرسال...', en: 'Sending...', color: 'var(--muted)' },
+    success:     { ar: 'تم إرسال رسالتك بنجاح، سنتواصل معك قريباً.', en: 'Your message has been sent successfully. We\'ll get back to you shortly.', color: 'var(--gold-400)' },
+    error:       { ar: 'تعذر إرسال الرسالة، يرجى المحاولة مرة أخرى أو التواصل عبر واتساب.', en: 'Failed to send your message. Please try again or contact us via WhatsApp.', color: '#e07a7a' },
+    validation:  { ar: 'يرجى تعبئة الاسم والبريد الإلكتروني الصحيح والرسالة.', en: 'Please fill in your name, a valid email, and a message.', color: '#e07a7a' }
+  };
+
+  function showStatus(key, isError){
+    const statusEl = document.getElementById('formStatus');
+    const msg = statusMessages[key];
+    statusEl.textContent = msg[currentLang];
+    statusEl.style.color = msg.color;
+    statusEl.style.display = 'block';
+  }
+
+  document.getElementById('btn-whatsapp-fallback').addEventListener('click', () => {
+    const name = document.getElementById('input-name').value.trim();
+    const service = document.getElementById('select-service').value;
+    const message = document.getElementById('input-message').value.trim();
+    const lines = currentLang === 'ar'
+      ? [`مرحباً، اسمي ${name || '...'}.`, `مجال الاهتمام: ${service}.`, message ? `الرسالة: ${message}` : '']
+      : [`Hello, my name is ${name || '...'}.`, `Interest: ${service}.`, message ? `Message: ${message}` : ''];
+    const text = encodeURIComponent(lines.filter(Boolean).join('\n'));
+    window.open(`https://wa.me/971588983177?text=${text}`, '_blank');
+  });
 
   const revealEls = document.querySelectorAll('.reveal');
   const io = new IntersectionObserver((entries) => {
@@ -549,17 +623,17 @@
     'label-address': { ar: 'المقر الرئيسي', en: 'Head Office' },
     'value-address': { ar: 'المطينة، دبي، الإمارات العربية المتحدة', en: 'Al Muteena, Dubai, United Arab Emirates' },
     'label-name': { ar: 'الاسم الكامل', en: 'Full Name' },
-    'label-phone': { ar: 'رقم الجوال', en: 'Phone Number' },
+    'label-phone': { ar: 'رقم الجوال / واتساب', en: 'Phone / WhatsApp' },
     'label-emailform': { ar: 'البريد الإلكتروني', en: 'Email Address' },
-    'label-service': { ar: 'الخدمة المطلوبة', en: 'Service Required' },
+    'label-company': { ar: 'الشركة', en: 'Company' },
+    'label-service': { ar: 'مجال الاهتمام', en: 'Area of Interest' },
     'opt-1': { ar: 'التجارة العامة', en: 'General Trading' },
     'opt-2': { ar: 'الاستيراد والتصدير', en: 'Import & Export' },
     'opt-3': { ar: 'التوزيع بالجملة', en: 'Wholesale Distribution' },
     'opt-4': { ar: 'أخرى', en: 'Other' },
     'label-message': { ar: 'الرسالة', en: 'Message' },
     'btn-submit': { ar: 'إرسال الطلب', en: 'Submit Request' },
-    'formMsg': { ar: 'تم استلام رسالتك بنجاح، سنتواصل معك قريباً.', en: 'Your message has been received. We\'ll get back to you shortly.' },
-    'formErr': { ar: 'تعذر الإرسال، حاول مرة أخرى أو تواصل عبر واتساب.', en: 'Sending failed. Please try again or reach us on WhatsApp.' },
+    'btn-whatsapp-fallback': { ar: 'تواصل عبر واتساب', en: 'Contact via WhatsApp' },
     'footer-copy': { ar: '© 2026 مؤسسة الفهد الذهبي للتجارة العامة. جميع الحقوق محفوظة.', en: '© 2026 Al Fahd Al Dhahabi General Trading. All rights reserved.' },
     'fnav-home': { ar: 'الرئيسية', en: 'Home' },
     'fnav-about': { ar: 'من نحن', en: 'About Us' },
@@ -571,6 +645,7 @@
     'input-name': { ar: 'اكتب اسمك', en: 'Enter your name' },
     'input-phone': { ar: '05XXXXXXXX', en: '05XXXXXXXX' },
     'input-email': { ar: 'example@email.com', en: 'example@email.com' },
+    'input-company': { ar: 'اسم الشركة (اختياري)', en: 'Company name (optional)' },
     'input-message': { ar: 'أخبرنا عن احتياجك...', en: 'Tell us about your needs...' }
   };
 
